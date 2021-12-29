@@ -5,12 +5,22 @@ use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
 
+/** Contains a Future and a piece of data, sharing the data between
+  * the Future and the outside world.
+  * After creating with `new`, the resulting object must be pinned in memory
+  * and then initialized using `init`. This makes the struct self-referential,
+  * which is why it needs to be pinned from this point on.
+  * `data`'s type is usually something like RefCell. Ensure that the coroutine
+  * does not borrow the RefCell across yield points. */
 struct FutureContainer<T, F: Future> {
 	data: T,
 	future: Option<F>
 }
 
 impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
+	/** Returns a new, but not yet usable container. The resulting
+	 * container must be pinned in memory first and then initialized
+	 * using `init`. */
 	pub fn new(data: T) -> Self {
 		FutureContainer {
 			data,
@@ -27,13 +37,21 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 		unsafe {
 			// SAFETY: No Pin of `future` has been created yet, because `future` was None
 			// until now. This is why we may use `future` in an unpinned context here.
+			// Dereferencing `data_ptr` will store a reference to &self.data in self.future.
+			// Since self.data can not be invalidated without destroying the whole self,
+			// this is sound.
 			self.get_unchecked_mut().future = Some(future_factory(&*data_ptr));
 		}
 	}
 
+	/** Polls the underlying future. Must not be called before calling `init`. */
 	pub fn poll(self: Pin<&mut Self>) {
 		assert!(self.future.is_some(), "init must be called before polling");
 		let pinned_future = unsafe {
+			// SAFETY: Pin::new_unchecked is sound because self is pinned and we are never
+			// moving out of pin; the only function that could do this is init, but poll
+			// asserts that init has been called once and init asserts that init has not been
+			// called yet.
 			Pin::new_unchecked(self.get_unchecked_mut().future.as_mut().unwrap())
 		};
 
