@@ -6,22 +6,24 @@ use core::future::Future;
 use core::pin::Pin;
 
 struct FutureContainer<T, F: Future> {
-	data: RefCell<T>,
+	data: T,
 	future: Option<F>
 }
 
 impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 	pub fn new(data: T) -> Self {
 		FutureContainer {
-			data: RefCell::new(data),
+			data,
 			future: None
 		}
 	}
 
-	pub fn init(self: Pin<&mut Self>, future_factory: impl FnOnce(&'a RefCell<T>) -> F) {
+	/** Initializes the container, establishing the self-reference. This function
+	  * must be called exactly once and must be called before any calls to `poll`. */
+	pub fn init(self: Pin<&mut Self>, future_factory: impl FnOnce(&'a T) -> F) {
 		assert!(self.future.is_some(), "init must not be called more than once");
 
-		let data_ptr: *const RefCell<T> = &self.data;
+		let data_ptr: *const T = &self.data;
 		unsafe {
 			// SAFETY: No Pin of `future` has been created yet, because `future` was None
 			// until now. This is why we may use `future` in an unpinned context here.
@@ -52,7 +54,7 @@ fn make_future<'a>(data: &'a RefCell<u32>) -> MyFuture<'a> {
 }
 
 fn main() {
-	let mut bla = Box::pin(FutureContainer::<u32, MyFuture>::new(42));
+	let mut bla = Box::pin(FutureContainer::<RefCell<u32>, MyFuture>::new(RefCell::new(42)));
 
 	bla.as_mut().init(make_future);
 	
