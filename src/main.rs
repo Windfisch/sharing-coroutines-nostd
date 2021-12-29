@@ -10,7 +10,7 @@ struct FutureContainer<T, F: Future> {
 	future: Option<F>
 }
 
-impl<T, F: Future<Output=()>> FutureContainer<T, F> {
+impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 	pub fn new(data: T) -> Self {
 		FutureContainer {
 			data: RefCell::new(data),
@@ -18,7 +18,7 @@ impl<T, F: Future<Output=()>> FutureContainer<T, F> {
 		}
 	}
 
-	pub fn init(self: Pin<&mut Self>, future_factory: impl FnOnce(&RefCell<T>) -> F) {
+	pub fn init(self: Pin<&mut Self>, future_factory: impl FnOnce(&'a RefCell<T>) -> F) {
 		assert!(self.future.is_some(), "init must not be called more than once");
 
 		let data_ptr: *const RefCell<T> = &self.data;
@@ -54,12 +54,12 @@ fn make_future<'a>(data: &'a RefCell<u32>) -> MyFuture<'a> {
 fn main() {
 	let mut bla = Box::pin(FutureContainer::<u32, MyFuture>::new(42));
 
-	//bla.as_mut().init(make_future);
+	bla.as_mut().init(make_future);
 	
 	//bla.as_mut().init(|blubb: &_| make_future(blubb));
 	
-	let x = |blubb| make_future(blubb);
-	bla.as_mut().init(x);
+	//let x = |blubb| make_future(blubb);
+	//bla.as_mut().init(x);
 
 	bla.as_mut().poll();
 }
