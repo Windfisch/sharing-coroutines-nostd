@@ -10,7 +10,7 @@ struct FutureContainer<T, F: Future> {
 	future: Option<F>
 }
 
-impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
+impl<T, F: Future<Output=()>> FutureContainer<T, F> {
 	pub fn new(data: T) -> Self {
 		FutureContainer {
 			data: RefCell::new(data),
@@ -25,8 +25,7 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 		unsafe {
 			// SAFETY: No Pin of `future` has been created yet, because `future` was None
 			// until now. This is why we may use `future` in an unpinned context here.
-			let bla: &'a _ = std::mem::transmute(&*data_ptr); // FIXME
-			self.get_unchecked_mut().future = Some(future_factory(bla));
+			self.get_unchecked_mut().future = Some(future_factory(&*data_ptr));
 		}
 	}
 
@@ -54,8 +53,14 @@ fn make_future<'a>(data: &'a RefCell<u32>) -> MyFuture<'a> {
 
 fn main() {
 	let mut bla = Box::pin(FutureContainer::<u32, MyFuture>::new(42));
-	bla.as_mut().init(make_future);
+
+	//bla.as_mut().init(make_future);
+	
 	//bla.as_mut().init(|blubb: &_| make_future(blubb));
+	
+	let x = |blubb| make_future(blubb);
+	bla.as_mut().init(x);
+
 	bla.as_mut().poll();
 }
 
