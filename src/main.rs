@@ -53,7 +53,7 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 	/** Initializes the container, establishing the self-reference. This function
 	  * must be called exactly once and must be called before any calls to `poll`. */
 	pub fn init(self: Pin<&mut Self>, future_factory: impl FnOnce(&'a T) -> F) {
-		assert!(self.future.is_some(), "init must not be called more than once");
+		assert!(self.future.is_none(), "init must not be called more than once");
 
 		let data_ptr: *const T = &self.data;
 		unsafe {
