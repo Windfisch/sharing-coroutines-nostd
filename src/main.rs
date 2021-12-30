@@ -5,6 +5,28 @@ use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
 
+struct YieldFuture {
+	first: core::cell::Cell<bool>
+}
+
+impl Future for YieldFuture {
+	type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
+		if self.first.get() == true {
+			self.first.set(false);
+			return core::task::Poll::Pending;
+		}
+		else {
+			return core::task::Poll::Ready(());
+		}
+	}
+}
+
+fn fyield() -> YieldFuture {
+	YieldFuture { first: core::cell::Cell::new(true) }
+}
+
 /** Contains a Future and a piece of data, sharing the data between
   * the Future and the outside world.
   * After creating with `new`, the resulting object must be pinned in memory
