@@ -60,6 +60,9 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 		let _ = pinned_future.poll(&mut dummy_context);
 	}
 
+	pub fn data(self: &'a Pin<&Self>) -> &'a T {
+		&self.data
+	}
 }
 
 type MyFuture<'a> = impl Future<Output=()> + 'a;
