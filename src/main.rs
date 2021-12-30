@@ -92,13 +92,18 @@ type MyFuture<'a> = impl Future<Output=()> + 'a;
 
 fn make_future<'a>(data: &'a RefCell<u32>) -> MyFuture<'a> {
 	async fn blah(data: &RefCell<u32>) {
-
+		println!("hi {}", *data.borrow());
+		*data.borrow_mut() = 42;
+		fyield().await;
+		println!("hello {}", *data.borrow());
+		fyield().await;
+		println!("bye {}", *data.borrow());
 	}
 	blah(data)
 }
 
 fn main() {
-	let mut bla = Box::pin(FutureContainer::<RefCell<u32>, MyFuture>::new(RefCell::new(42)));
+	let mut bla = Box::pin(FutureContainer::<RefCell<u32>, MyFuture>::new(RefCell::new(1)));
 
 	bla.as_mut().init(make_future);
 	
@@ -107,6 +112,12 @@ fn main() {
 	//let x = |blubb| make_future(blubb);
 	//bla.as_mut().init(x);
 
+	println!("poll {}", *bla.as_ref().data().borrow());
+	bla.as_mut().poll();
+	println!("poll {}", *bla.as_ref().data().borrow());
+	bla.as_mut().poll();
+	println!("poll {}", *bla.as_ref().data().borrow());
+	*bla.as_ref().data().borrow_mut() = 1337;
 	bla.as_mut().poll();
 }
 
