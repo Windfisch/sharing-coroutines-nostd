@@ -82,6 +82,7 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 		let _ = pinned_future.poll(&mut dummy_context);
 	}
 
+	/** Allows to access the data shared with the coroutine. */
 	pub fn data(self: &'a Pin<&Self>) -> &'a T {
 		&self.data
 	}
