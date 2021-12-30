@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "coroutine"
+name = "sharing-coroutines-nostd"
 version = "0.1.0"

@@ -1,30 +1,35 @@
-//#![no_std]
-#![feature(generators, generator_trait, type_alias_impl_trait)]
+#![no_std]
 
-use core::cell::RefCell;
-use core::future::Future;
+use core::cell::Cell;
 use core::pin::Pin;
+use core::future::Future;
+use core::task::{Poll, Context};
 
-struct YieldFuture {
-	first: core::cell::Cell<bool>
+/** A Future that needs to be `poll`ed exactly twice in order to get `Ready`.
+  * Note that this future can not be used in the usual async executors such as tokio etc,
+  * because it does not register a waker. Awaiting this future in such an executor will
+  * block forever.
+  */
+pub struct YieldFuture {
+	first: Cell<bool>
 }
 
 impl Future for YieldFuture {
 	type Output = ();
 
-    fn poll(self: Pin<&mut Self>, _: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
 		if self.first.get() == true {
 			self.first.set(false);
-			return core::task::Poll::Pending;
+			return Poll::Pending;
 		}
 		else {
-			return core::task::Poll::Ready(());
+			return Poll::Ready(());
 		}
 	}
 }
 
-fn fyield() -> YieldFuture {
-	YieldFuture { first: core::cell::Cell::new(true) }
+pub fn fyield() -> YieldFuture {
+	YieldFuture { first: Cell::new(true) }
 }
 
 /** Contains a Future and a piece of data, sharing the data between
@@ -34,7 +39,7 @@ fn fyield() -> YieldFuture {
   * which is why it needs to be pinned from this point on.
   * `data`'s type is usually something like RefCell. Ensure that the coroutine
   * does not borrow the RefCell across yield points. */
-struct FutureContainer<T, F: Future> {
+pub struct FutureContainer<T, F: Future> {
 	data: T,
 	future: Option<F>
 }
@@ -78,7 +83,7 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 		};
 
 		let waker = null_waker::create();
-		let mut dummy_context = core::task::Context::from_waker(&waker);
+		let mut dummy_context = Context::from_waker(&waker);
 		let _ = pinned_future.poll(&mut dummy_context);
 	}
 
@@ -87,41 +92,6 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 		&self.data
 	}
 }
-
-type MyFuture<'a> = impl Future<Output=()> + 'a;
-
-fn make_future<'a>(data: &'a RefCell<u32>) -> MyFuture<'a> {
-	async fn blah(data: &RefCell<u32>) {
-		println!("hi {}", *data.borrow());
-		*data.borrow_mut() = 42;
-		fyield().await;
-		println!("hello {}", *data.borrow());
-		fyield().await;
-		println!("bye {}", *data.borrow());
-	}
-	blah(data)
-}
-
-fn main() {
-	let mut bla = Box::pin(FutureContainer::<RefCell<u32>, MyFuture>::new(RefCell::new(1)));
-
-	bla.as_mut().init(make_future);
-	
-	//bla.as_mut().init(|blubb: &_| make_future(blubb));
-	
-	//let x = |blubb| make_future(blubb);
-	//bla.as_mut().init(x);
-
-	println!("poll {}", *bla.as_ref().data().borrow());
-	bla.as_mut().poll();
-	println!("poll {}", *bla.as_ref().data().borrow());
-	bla.as_mut().poll();
-	println!("poll {}", *bla.as_ref().data().borrow());
-	*bla.as_ref().data().borrow_mut() = 1337;
-	bla.as_mut().poll();
-}
-
-
 
 mod null_waker
 {
