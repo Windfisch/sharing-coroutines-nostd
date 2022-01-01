@@ -15,13 +15,13 @@ fn main() {
 
 	// as soon we have the future_container pinned in memory, we need to initialize
 	// it so it becomes self-referential.
-	future_container.as_mut().init(make_future);
+	future_container.as_ref().init(make_future);
 	
 	println!("poll {}", *future_container.as_ref().data().borrow()); // "poll 1"
-	future_container.as_mut().poll(); // "hi 1"
+	future_container.as_ref().poll(); // "hi 1"
 	println!("poll {}", *future_container.as_ref().data().borrow()); // "poll 42"
-	future_container.as_mut().poll(); // "hello 42"
+	future_container.as_ref().poll(); // "hello 42"
 	println!("poll {}", *future_container.as_ref().data().borrow()); // "poll 42"
 	*future_container.as_ref().data().borrow_mut() = 1337;
-	future_container.as_mut().poll(); // "bye 1337"
+	future_container.as_ref().poll(); // "bye 1337"
 }
