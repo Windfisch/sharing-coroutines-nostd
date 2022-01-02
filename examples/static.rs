@@ -27,20 +27,20 @@ static mut FUTURE_CONTAINER: MaybeUninit<FutureContainer::<RefCell<u32>, MyFutur
 fn main() {
 	// SAFTEY: This must be the only use of FUTURE_CONTAINER, to ensure that 1. there are no concurrent / aliasing
 	// references to it, and 2. that the Pin contract is upheld.
-	let mut future_container = unsafe {
+	let future_container = unsafe {
 		FUTURE_CONTAINER.write(FutureContainer::new(RefCell::new(1)));
-		Pin::new_unchecked(FUTURE_CONTAINER.assume_init_mut())
+		Pin::new_unchecked(FUTURE_CONTAINER.assume_init_ref())
 	};
 
 	// as soon we have the future_container pinned in memory, we need to initialize
 	// it so it becomes self-referential.
-	future_container.as_mut().init(make_future);
+	future_container.as_ref().init(make_future);
 	
 	println!("poll {}", *future_container.as_ref().data().borrow()); // "poll 1"
-	future_container.as_mut().poll(); // "hi 1"
+	future_container.as_ref().poll(); // "hi 1"
 	println!("poll {}", *future_container.as_ref().data().borrow()); // "poll 42"
-	future_container.as_mut().poll(); // "hello 42"
+	future_container.as_ref().poll(); // "hello 42"
 	println!("poll {}", *future_container.as_ref().data().borrow()); // "poll 42"
 	*future_container.as_ref().data().borrow_mut() = 1337;
-	future_container.as_mut().poll(); // "bye 1337"
+	future_container.as_ref().poll(); // "bye 1337"
 }

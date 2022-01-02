@@ -11,7 +11,7 @@ async fn make_future(data: &RefCell<u32>) {
 }
 
 fn main() {
-	let mut future_container = Box::pin(FutureContainer::new(RefCell::new(1)));
+	let future_container = Box::pin(FutureContainer::new(RefCell::new(1)));
 
 	// as soon we have the future_container pinned in memory, we need to initialize
 	// it so it becomes self-referential.
