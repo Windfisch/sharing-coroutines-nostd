@@ -1,6 +1,6 @@
 #![no_std]
 
-use core::cell::{Cell, RefCell};
+use core::cell::{Cell, UnsafeCell};
 use core::pin::Pin;
 use core::future::Future;
 use core::task::{Poll, Context};
@@ -41,7 +41,7 @@ pub fn fyield() -> YieldFuture {
   * does not borrow the RefCell across yield points. */
 pub struct FutureContainer<T, F: Future> {
 	data: T,
-	future: RefCell<Option<F>>
+	future: UnsafeCell<Option<F>>
 }
 
 impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
@@ -51,14 +51,16 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 	pub fn new(data: T) -> Self {
 		FutureContainer {
 			data,
-			future: RefCell::new(None)
+			future: UnsafeCell::new(None)
 		}
 	}
 
 	/** Initializes the container, establishing the self-reference. This function
 	  * must be called exactly once and must be called before any calls to `poll`. */
 	pub fn init(self: Pin<&Self>, future_factory: impl FnOnce(&'a T) -> F) {
-		assert!(self.future.borrow().is_none(), "init must not be called more than once");
+		unsafe {
+			assert!((*self.future.get()).is_none(), "init must not be called more than once");
+		}
 
 		let data_ptr: *const T = &self.data;
 		unsafe {
@@ -67,20 +69,22 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 			// Dereferencing `data_ptr` will store a reference to &self.data in self.future.
 			// Since self.data can not be invalidated without destroying the whole self,
 			// this is sound.
-			*self.future.borrow_mut() = Some(future_factory(&*data_ptr));
+			*self.future.get() = Some(future_factory(&*data_ptr));
 		}
 	}
 
 	/** Polls the underlying future. Must not be called before calling `init`. */
 	pub fn poll(self: Pin<&Self>) {
-		assert!(self.future.borrow().is_some(), "init must be called before polling");
-		let mut future = self.future.borrow_mut();
+		unsafe {
+			assert!((*self.future.get()).is_some(), "init must be called before polling");
+		}
+
 		let pinned_future = unsafe {
 			// SAFETY: Pin::new_unchecked is sound because self is pinned and we are never
 			// moving out of pin; the only function that could do this is init, but poll
 			// asserts that init has been called once and init asserts that init has not been
 			// called yet.
-			Pin::new_unchecked(future.as_mut().unwrap())
+			Pin::new_unchecked((*self.future.get()).as_mut().unwrap())
 		};
 
 		let waker = null_waker::create();
