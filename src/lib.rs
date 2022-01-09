@@ -41,23 +41,29 @@ pub fn fyield() -> YieldFuture {
   * does not borrow the RefCell across yield points. */
 pub struct FutureContainer<T, F: Future> {
 	data: T,
-	future: UnsafeCell<Option<F>>
+	future: UnsafeCell<Option<F>>,
+	init_func: for<'a> fn(&'a T) -> F
 }
 
-impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
+impl<'a, T: 'a, F: Future<Output=()>> FutureContainer<T, F> {
 	/** Returns a new, but not yet usable container. The resulting
 	 * container must be pinned in memory first and then initialized
-	 * using `init`. */
-	pub fn new(data: T) -> Self {
+	 * using `init`.
+	 * `init_func` receives a reference of any lifetime, which is a lie!
+	 * `init_func` must ensure to use that reference only within the future
+	 * (which lives short enough). That's why `new` is unsafe.
+	 */
+	pub unsafe fn new(data: T, init_func: fn(&'a T) -> F) -> Self {
 		FutureContainer {
 			data,
-			future: UnsafeCell::new(None)
+			future: UnsafeCell::new(None),
+			init_func: core::mem::transmute(init_func) // FIXME is this safe and why?
 		}
 	}
 
 	/** Initializes the container, establishing the self-reference. This function
 	  * must be called exactly once and must be called before any calls to `poll`. */
-	pub fn init(self: Pin<&Self>, future_factory: impl FnOnce(&'a T) -> F) {
+	pub fn init(self: Pin<&Self>) {
 		unsafe {
 			assert!((*self.future.get()).is_none(), "init must not be called more than once");
 		}
@@ -69,7 +75,7 @@ impl<'a, T: 'a, F: Future<Output=()> + 'a> FutureContainer<T, F> {
 			// Dereferencing `data_ptr` will store a reference to &self.data in self.future.
 			// Since self.data can not be invalidated without destroying the whole self,
 			// this is sound.
-			*self.future.get() = Some(future_factory(&*data_ptr));
+			*self.future.get() = Some((self.init_func)(&*data_ptr));
 		}
 	}
 
