@@ -32,11 +32,13 @@ pub fn fyield() -> YieldFuture {
 	YieldFuture { first: Cell::new(true) }
 }
 
-/** Contains a Future and a piece of data, sharing the data between
+/** Contains a Option<Future> and a piece of data, sharing the data between
   * the Future and the outside world.
   * After creating with `new`, the resulting object must be pinned in memory
   * and then initialized using `init`. This makes the struct self-referential,
   * which is why it needs to be pinned from this point on.
+  * `FutureContainer` has Option-like semantics, as it can either contain or
+  * not contain an initialized Future.
   * `data`'s type is usually something like RefCell. Ensure that the coroutine
   * does not borrow the RefCell across yield points. */
 pub struct FutureContainer<T, F: Future> {
@@ -62,16 +64,12 @@ impl<'a, T: 'a, F: Future<Output=()>> FutureContainer<T, F> {
 	}
 
 	/** Initializes the container, establishing the self-reference. This function
-	  * must be called exactly once and must be called before any calls to `poll`. */
+	  * must be called before any calls to `poll`. */
 	pub fn init(self: Pin<&Self>) {
-		unsafe {
-			assert!((*self.future.get()).is_none(), "init must not be called more than once");
-		}
-
 		let data_ptr: *const T = &self.data;
 		unsafe {
-			// SAFETY: No Pin of `future` has been created yet, because `future` was None
-			// until now. This is why we may use `future` in an unpinned context here.
+			// SAFETY: If the future is already Some(foo), then foo is dropped during the
+			// assignment, upholding the Pin contract.
 			// Dereferencing `data_ptr` will store a reference to &self.data in self.future.
 			// Since self.data can not be invalidated without destroying the whole self,
 			// this is sound.
@@ -79,17 +77,27 @@ impl<'a, T: 'a, F: Future<Output=()>> FutureContainer<T, F> {
 		}
 	}
 
+	pub fn clear(self: Pin<&Self>) {
+		unsafe {
+			*self.future.get() = None
+		}
+	}
+
+	pub fn is_init(self: Pin<&Self>) -> bool {
+		unsafe {
+			(*self.future.get()).is_some()
+		}
+	}
+
 	/** Polls the underlying future. Must not be called before calling `init`. */
 	pub fn poll(self: Pin<&Self>) {
 		unsafe {
-			assert!((*self.future.get()).is_some(), "init must be called before polling");
+			assert!((*self.future.get()).is_some(), "cannot poll an uninitialized future");
 		}
 
 		let pinned_future = unsafe {
 			// SAFETY: Pin::new_unchecked is sound because self is pinned and we are never
-			// moving out of pin; the only function that could do this is init, but poll
-			// asserts that init has been called once and init asserts that init has not been
-			// called yet.
+			// moving out of pin
 			Pin::new_unchecked((*self.future.get()).as_mut().unwrap())
 		};
 
