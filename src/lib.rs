@@ -83,7 +83,7 @@ impl<'a, T: 'a, F: Future<Output=()>> FutureContainer<T, F> {
 		}
 	}
 
-	pub fn is_init(self: Pin<&Self>) -> bool {
+	pub fn is_init(&self) -> bool {
 		unsafe {
 			(*self.future.get()).is_some()
 		}
