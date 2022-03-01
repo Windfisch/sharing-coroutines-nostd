@@ -1,5 +1,5 @@
 #![no_std]
-
+use pin_project::pin_project;
 use core::cell::{Cell, UnsafeCell};
 use core::pin::Pin;
 use core::future::Future;
@@ -41,10 +41,59 @@ pub fn fyield() -> YieldFuture {
   * not contain an initialized Future.
   * `data`'s type is usually something like RefCell. Ensure that the coroutine
   * does not borrow the RefCell across yield points. */
+#[pin_project]
 pub struct FutureContainer<T, F: Future> {
 	data: T,
-	future: UnsafeCell<Option<F>>,
-	init_func: for<'a> fn(&'a T) -> F
+	data_locked: bool,
+	#[pin]
+	future: Option<F>,
+	init_func: fn(PointerWrapper<T>) -> F
+}
+
+pub struct PointerWrapper<T> {
+	data_ptr: *mut T,
+	data_locked_ptr: *mut bool
+}
+
+impl<T> PointerWrapper<T> {
+	pub fn lock(&mut self) -> PointerGuard<T> {
+		unsafe {
+			// SAFETY: no reference to *data_locked_ptr can exist TODO WHY
+			if *self.data_locked_ptr {
+				unreachable!("Attempted to lock PointerWrapper twice!");
+			}
+			*self.data_locked_ptr = true;
+		
+			return PointerGuard { data_ptr: &mut *self.data_ptr, data_locked_ptr: self.data_locked_ptr }
+		}
+	}
+}
+
+pub struct PointerGuard<'a, T> {
+	data_ptr: &'a mut T,
+	data_locked_ptr: *mut bool
+}
+
+impl<T> core::ops::Deref for PointerGuard<'_, T> {
+	type Target = T;
+
+	fn deref(&self) -> &T {
+		return self.data_ptr;
+	}
+}
+
+impl<T> core::ops::DerefMut for PointerGuard<'_, T> {
+	fn deref_mut(&mut self) -> &mut T {
+		return self.data_ptr;
+	}
+}
+
+impl<T> core::ops::Drop for PointerGuard<'_, T> {
+	fn drop(&mut self) {
+		unsafe {
+			*self.data_locked_ptr = false;
+		}
+	}
 }
 
 impl<'a, T: 'a, F: Future<Output=()>> FutureContainer<T, F> {
@@ -55,60 +104,51 @@ impl<'a, T: 'a, F: Future<Output=()>> FutureContainer<T, F> {
 	 * `init_func` must ensure to use that reference only within the future
 	 * (which lives short enough). That's why `new` is unsafe.
 	 */
-	pub unsafe fn new(data: T, init_func: fn(&'a T) -> F) -> Self {
+	pub unsafe fn new(data: T, init_func: fn(PointerWrapper<T>) -> F) -> Self {
 		FutureContainer {
 			data,
-			future: UnsafeCell::new(None),
-			init_func: core::mem::transmute(init_func) // FIXME is this safe and why?
+			data_locked: false,
+			future: None,
+			init_func
 		}
 	}
 
 	/** Initializes the container, establishing the self-reference. This function
 	  * must be called before any calls to `poll`. */
-	pub fn init(self: Pin<&Self>) {
-		let data_ptr: *const T = &self.data;
-		unsafe {
-			// SAFETY: If the future is already Some(foo), then foo is dropped during the
-			// assignment, upholding the Pin contract.
-			// Dereferencing `data_ptr` will store a reference to &self.data in self.future.
-			// Since self.data can not be invalidated without destroying the whole self,
-			// this is sound.
-			*self.future.get() = Some((self.init_func)(&*data_ptr));
-		}
+	pub fn init(self: Pin<&mut Self>) {
+		let mut this = self.project();
+		let mut pointer_wrapper = PointerWrapper {
+			data_ptr: this.data,
+			data_locked_ptr: this.data_locked
+		};
+		{ pointer_wrapper.lock(); } // DEBUG
+		this.future.set(Some((this.init_func)(pointer_wrapper)));
 	}
 
-	pub fn clear(self: Pin<&Self>) {
-		unsafe {
-			*self.future.get() = None
-		}
+	pub fn clear(self: Pin<&mut Self>) {
+		let mut this = self.project();
+		this.future.set(None);
 	}
 
 	pub fn is_init(&self) -> bool {
-		unsafe {
-			(*self.future.get()).is_some()
-		}
+		self.future.is_some()
 	}
 
 	/** Polls the underlying future. Must not be called before calling `init`. */
-	pub fn poll(self: Pin<&Self>) {
-		unsafe {
-			assert!((*self.future.get()).is_some(), "cannot poll an uninitialized future");
-		}
+	pub fn poll(self: Pin<&mut Self>) {
+		let this = self.project();
 
-		let pinned_future = unsafe {
-			// SAFETY: Pin::new_unchecked is sound because self is pinned and we are never
-			// moving out of pin
-			Pin::new_unchecked((*self.future.get()).as_mut().unwrap())
-		};
-
+		let pinned_future = this.future.as_pin_mut().expect("cannot poll an uninitialized future");
 		let waker = null_waker::create();
 		let mut dummy_context = Context::from_waker(&waker);
 		let _ = pinned_future.poll(&mut dummy_context);
+
+		assert!(!*this.data_locked, "Coroutine data lock held across yield point!");
 	}
 
 	/** Allows to access the data shared with the coroutine. */
-	pub fn data(self: &'a Pin<&Self>) -> &'a T {
-		&self.data
+	pub fn data(self: Pin<&'a mut Self>) -> &'a mut T {
+		self.project().data
 	}
 }
 
